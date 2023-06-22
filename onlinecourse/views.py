@@ -132,35 +132,83 @@ def enroll(request, course_id):
         # Calculate the total score
 #def show_exam_result(request, course_id, submission_id):
 
-def submit(request, course_id):
+def submit(request, course_id, lesson_id):
+    # Lesson id retrieved from the exam form
     course = get_object_or_404(Course, pk=course_id)
     user = request.user
+    
     enrollment = Enrollment.objects.get(user=user, course=course)
     submission = Submission.objects.create(enrollment=enrollment)
-    choices = extract_answers(request)
-    submission.choices.set(choices)
     submission_id = submission.id
-    return HttpResponseRedirect(reverse(viewname='onlinecourse:exam_result', args=(course_id, submission_id,)))
 
+    total_choices = extract_answers(request)
+    submission.choices.set(total_choices)
+
+    # Passing the lesson id retrieved from the exam form
+    # This makes the selection of lesson independent of any choices made
+    return HttpResponseRedirect(reverse(viewname="onlinecourse:exam_result", args=(course_id, lesson_id, submission_id)))
+    
+
+# <HINT> A example method to collect the selected choices from the exam form from the request object
 def extract_answers(request):
-    submitted_answers = []
-    for key in request.POST:
-        if key.startswith('choice'):
-            #value = request.POST[key]
-            choice_id = request.POST[key]
-            submitted_answers.append(Choice.objects.get(id=choice_id))
-    return submitted_answers
+   submitted_anwsers = []
+   for key in request.POST:
+       if key.startswith('choice'):
+           value = request.POST[key]
+           choice_id = int(value)
+           submitted_anwsers.append(choice_id)
+   return submitted_anwsers
 
-def show_exam_result(request, course_id, submission_id):
+
+# <HINT> Create an exam result view to check if learner passed exam and show their question results and result for each question,
+# you may implement it based on the following logic:
+        # Get course and submission based on their ids
+        # Get the selected choice ids from the submission record
+        # For each selected choice, check if it is a correct answer or not
+        # Calculate the total score
+        
+def show_exam_result(request, course_id, lesson_id, submission_id):
+    # This lesson id is eventually used to retrieve the concerened lesson
     context = {}
+    # Get course
     course = get_object_or_404(Course, pk=course_id)
+    # Get Lesson
+    lesson = get_object_or_404(Lesson, pk=lesson_id)
+    # Get question set for the above lesson
+    question_set = Question.objects.filter(lesson=lesson)
+    # Get submission object
     submission = Submission.objects.get(id=submission_id)
-    choices = submission.choices.all()
+    # Retrieve the choice set of the submission
+    choice_set = submission.choices.all()
+    # Get the total question count related to the concerened lesson
+    count = question_set.count()
+
+    # Retrieve question ids in choice set - 
+    # Required to evaluate multiple choice questions and unattempted questions
+    question_ids = [] 
+    score = 0
     total_score = 0
-    for choice in choices:
-        if choice.is_correct:
-            total_score += int(choice.question.grade)
-    context['course'] = course
-    context['grade'] = total_score
-    context['choices'] = choices
-    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
+
+    for choice in choice_set:
+        question_ids.append(choice.question.id)
+
+    question_ids = [*set(question_ids)]
+
+    for q in question_ids:
+        curr_ques = Question.objects.get(id = q)
+        choices = choice_set.filter(question=curr_ques)
+        if curr_ques.is_get_score(choices):
+            score += curr_ques.mark
+    
+    total_score = round((score/count)*100, 2)
+
+    # Pass the context with the concerened lesson along with other parameters - 
+    # This helps in displaying the content related to the lesson only
+    context = {
+        "course" : course,
+        "lesson" : lesson,
+        "grade" : total_score,
+        "choices" : choice_set
+    }
+
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context) 
